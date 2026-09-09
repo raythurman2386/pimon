@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Name=Pimon
+GenericName=System Monitor
+Comment=Hardware sensor monitor for the Raspberry Pi, built with GPUI Kit
+Exec=pimon
+TryExec=pimon
+Icon=pimon
+Terminal=false
+StartupNotify=true
+Categories=Utility;System;Monitor;
+Keywords=sensors;temperature;throttling;hardware;monitor;
+StartupWMClass=pimon

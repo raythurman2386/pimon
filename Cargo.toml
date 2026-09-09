@@ -1,0 +1,35 @@
+[package]
+name = "pimon"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "A hardware sensor monitor for the Raspberry Pi built with GPUI Kit"
+repository = "https://github.com/raythurman2386/pimon"
+readme = "README.md"
+keywords = ["monitor", "sensors", "raspberry-pi", "gpui"]
+categories = ["gui"]
+
+[lib]
+name = "pimon"
+path = "src/lib.rs"
+
+[[bin]]
+name = "pimon"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1"
+directories = "6"
+gpui-kit = "0.6"
+notify = "8"
+smol = "2"
+
+[profile.release]
+lto = "thin"
+strip = "symbols"
+
+[profile.dev]
+opt-level = 0
+
+[profile.dev.package."*"]
+opt-level = 2
