@@ -1,5 +1,10 @@
+// Widget builder chains are deep expression trees; keep the macro
+// expansion budget generous.
+#![recursion_limit = "512"]
+
 mod app;
 mod views;
+mod widgets;
 
 fn main() {
     let app = gpui_kit::application().with_assets(gpui_kit::assets::Assets);

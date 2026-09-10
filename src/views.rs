@@ -1,19 +1,23 @@
-//! GPUI Kit rendering for Pimon: live charts, health badge, details table.
+//! GPUI Kit rendering for Pimon: a btop-style dense dashboard.
 //!
-//! Layout follows the gpui-kit `system_monitor` example: TitleBar with a
-//! segmented TabBar, a chart area, and a status bar of Progress chips.
+//! Layout: title bar with tabs + health badge; a row of big sensor
+//! readouts; per-core utilization and memory gauges; I/O charts; a clock
+//! and regulator grid; a status bar. The Details tab keeps the full
+//! sensor table and the throttling health card.
 
 use std::collections::VecDeque;
 
 use gpui_kit::component::chart::AreaChart;
-use gpui_kit::component::progress::Progress;
 use gpui_kit::component::tab::{Tab, TabBar};
 use gpui_kit::component::{h_flex, v_flex, ActiveTheme, Icon, IconName, TitleBar};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
-use pimon::sensors::{Snapshot, ThrottleState};
+use pimon::sensors::{MemoryInfo, Snapshot, ThrottleState};
 
 use crate::app::{Health, Pimon, POLL_INTERVAL};
+use crate::widgets::{
+    big_readout, clock_color, fmt_uptime, memory_gauges, temp_color, utilization_color, Gauge,
+};
 
 /// Render the whole window body. Called from `Render for Pimon`.
 pub fn render_pimon(
@@ -31,7 +35,7 @@ pub fn render_pimon(
         .text_color(cx.theme().foreground)
         .font_family("iA Writer Mono S")
         .key_context("pimon")
-        .child(render_title_bar(active_tab, health, cx))
+        .child(render_title_bar(state, active_tab, health, cx))
         .child(
             div()
                 .id("tab-content")
@@ -40,7 +44,6 @@ pub fn render_pimon(
                 .overflow_y_scroll()
                 .p_3()
                 .map(|this| match active_tab {
-                    0 => this.child(render_live_tab(state, cx)),
                     1 => this.child(render_details_tab(state, cx)),
                     _ => this.child(render_live_tab(state, cx)),
                 }),
@@ -49,6 +52,7 @@ pub fn render_pimon(
 }
 
 fn render_title_bar(
+    state: &Pimon,
     active_tab: usize,
     health: Health,
     cx: &mut Context<Pimon>,
@@ -58,6 +62,7 @@ fn render_title_bar(
         Health::Warn => (IconName::TriangleAlert, cx.theme().yellow),
         Health::Alert => (IconName::TriangleAlert, cx.theme().red),
     };
+    let uptime_text = state.latest().and_then(|s| s.uptime_secs).map(fmt_uptime);
 
     TitleBar::new().child(
         h_flex()
@@ -81,12 +86,25 @@ fn render_title_bar(
             )
             .child(
                 h_flex()
-                    .gap_2()
+                    .gap_3()
                     .items_center()
                     .text_xs()
-                    .text_color(badge_color)
-                    .child(Icon::new(badge_icon))
-                    .child(health_label(health)),
+                    .text_color(cx.theme().muted_foreground)
+                    .when_some(uptime_text, |this, uptime| {
+                        this.child(
+                            h_flex()
+                                .gap_1()
+                                .child(Icon::new(IconName::RotateCw))
+                                .child(uptime),
+                        )
+                    })
+                    .child(
+                        h_flex()
+                            .gap_1()
+                            .text_color(badge_color)
+                            .child(Icon::new(badge_icon))
+                            .child(health_label(health)),
+                    ),
             ),
     )
 }
@@ -97,6 +115,75 @@ fn health_label(health: Health) -> &'static str {
         Health::Warn => "Check history",
         Health::Alert => "Throttling risk",
     }
+}
+
+// ---------------------------------------------------------------- Live tab
+
+/// Top strip: one big readout per temperature plus CPU and memory.
+fn render_readouts(state: &Pimon, cx: &Context<Pimon>) -> impl IntoElement {
+    let latest = state.latest();
+    let readouts: Vec<(String, String, Hsla)> = match latest {
+        None => vec![("sensors".into(), "—".into(), cx.theme().muted_foreground)],
+        Some(snap) => {
+            let mut rows = Vec::new();
+            let push_temp = |rows: &mut Vec<_>, label: &str, temp: Option<f32>| {
+                if let Some(t) = temp {
+                    rows.push((label.to_string(), format!("{t:.1}°C"), temp_color(t, cx)));
+                }
+            };
+            push_temp(&mut rows, "soc", snap.soc_temp_c);
+            push_temp(&mut rows, "pmic", snap.pmic_temp_c);
+            push_temp(&mut rows, "nvme", snap.nvme_temp_c);
+            push_temp(&mut rows, "rp1", snap.rp1_temp_c);
+            for (label, temp) in &snap.extra_zones_c {
+                push_temp(&mut rows, &format!("zone {label}"), Some(*temp));
+            }
+            if let Some(util) = snap.utilization_pct {
+                rows.push((
+                    "cpu".into(),
+                    format!("{:.0}%", util * 100.0),
+                    utilization_color(util, cx),
+                ));
+            }
+            if let Some(mem) = snap.memory {
+                rows.push((
+                    "mem".into(),
+                    format!("{:.0}%", mem.used_pct),
+                    utilization_color(mem.used_pct / 100.0, cx),
+                ));
+            }
+            rows
+        }
+    };
+
+    h_flex().gap_4().flex_wrap().children(
+        readouts
+            .into_iter()
+            .map(|(label, value, color)| big_readout(&label, &value, color, cx)),
+    )
+}
+
+/// Per-core utilization bars, btop style.
+fn render_cores(state: &Pimon, cx: &Context<Pimon>) -> impl IntoElement {
+    let latest = state.latest();
+    let cores: Vec<(usize, f32)> = latest
+        .map(|s| {
+            s.cores
+                .iter()
+                .enumerate()
+                .map(|(ix, core)| (ix, core.utilization))
+                .collect()
+        })
+        .unwrap_or_default();
+
+    v_flex()
+        .gap_1()
+        .children(cores.into_iter().map(|(ix, util)| {
+            Gauge::new(format!("cpu{ix}"), util, utilization_color(util, cx))
+                .value_text(format!("{:.0}%", util * 100.0))
+                .cells(14)
+                .render(cx)
+        }))
 }
 
 #[derive(Clone)]
@@ -125,7 +212,7 @@ fn render_chart(
     let current = series.last().copied().unwrap_or(0.0);
 
     v_flex()
-        .min_h(px(120.))
+        .min_h(px(110.))
         .flex_1()
         .gap_1()
         .border_1()
@@ -163,75 +250,167 @@ fn render_chart(
         )
 }
 
-/// Live tab: four temperature charts plus the ARM clock.
+/// Clock domain grid: `arm 2400 MHz` cells for every domain that answered.
+fn render_clocks(state: &Pimon, cx: &Context<Pimon>) -> impl IntoElement {
+    let latest = state.latest();
+    let clocks: Vec<(&String, &f32)> = latest
+        .map(|s| s.all_clocks_mhz.iter().collect())
+        .unwrap_or_default();
+
+    h_flex()
+        .gap_4()
+        .flex_wrap()
+        .children(clocks.into_iter().map(|(name, mhz)| {
+            let color = if name == "arm" {
+                clock_color(*mhz, cx)
+            } else {
+                cx.theme().foreground
+            };
+            h_flex()
+                .gap_1()
+                .text_xs()
+                .child(
+                    div()
+                        .text_color(cx.theme().muted_foreground)
+                        .child(name.clone()),
+                )
+                .child(div().text_color(color).child(format!("{mhz:.0} MHz")))
+        }))
+}
+
+/// Voltage rails: vcgencmd rails plus enabled regulators.
+fn render_voltages(state: &Pimon, cx: &Context<Pimon>) -> impl IntoElement {
+    let latest = state.latest();
+    let mut rails: Vec<(String, String)> = Vec::new();
+    if let Some(snap) = latest {
+        if let Some(v) = snap.core_volts {
+            rails.push(("core".into(), format!("{v:.4} V")));
+        }
+        if let Some(v) = snap.sdram_volatile_volts {
+            rails.push(("sdram_c".into(), format!("{v:.4} V")));
+        }
+        if let Some(v) = snap.sdram_phy_volts {
+            rails.push(("sdram_p".into(), format!("{v:.4} V")));
+        }
+        for (name, volts) in &snap.regulators_v {
+            rails.push((name.clone(), format!("{volts:.2} V")));
+        }
+    }
+
+    h_flex()
+        .gap_4()
+        .flex_wrap()
+        .children(rails.into_iter().map(|(name, value)| {
+            h_flex()
+                .gap_1()
+                .text_xs()
+                .child(div().text_color(cx.theme().muted_foreground).child(name))
+                .child(div().text_color(cx.theme().foreground).child(value))
+        }))
+}
+
+/// Live tab: readouts, cores + memory, I/O charts, clocks and voltages.
 fn render_live_tab(state: &mut Pimon, cx: &mut Context<Pimon>) -> impl IntoElement {
     let history = state.history();
-    let soc = series(history, |s| s.soc_temp_c);
-    let pmic = series(history, |s| s.pmic_temp_c);
-    let nvme = series(history, |s| s.nvme_temp_c);
-    let rp1 = series(history, |s| s.rp1_temp_c);
-    let arm = series(history, |s| s.arm_clock_mhz);
+    let disk_read = series(history, |s| s.disk_io.map(|d| d.read_mib_s));
+    let disk_write = series(history, |s| s.disk_io.map(|d| d.write_mib_s));
+    let net_rx = series(history, |s| s.net_io.map(|d| d.rx_kib_s));
+    let net_tx = series(history, |s| s.net_io.map(|d| d.tx_kib_s));
 
     v_flex()
         .size_full()
         .gap_3()
+        .child(render_readouts(state, cx))
+        .child(
+            h_flex()
+                .gap_6()
+                .flex_wrap()
+                .child(render_cores(state, cx))
+                .child(render_memory(state, cx)),
+        )
         .child(
             h_flex()
                 .gap_3()
-                .flex_1()
-                .min_h_0()
-                .child(render_chart("SoC temp", &soc, "°C", cx.theme().red, 1, cx))
                 .child(render_chart(
-                    "PMIC temp",
-                    &pmic,
-                    "°C",
+                    "nvme read",
+                    &disk_read,
+                    " MiB/s",
+                    cx.theme().blue,
+                    2,
+                    cx,
+                ))
+                .child(render_chart(
+                    "nvme write",
+                    &disk_write,
+                    " MiB/s",
+                    cx.theme().accent,
+                    2,
+                    cx,
+                )),
+        )
+        .child(
+            h_flex()
+                .gap_3()
+                .child(render_chart(
+                    "wifi rx",
+                    &net_rx,
+                    " KiB/s",
+                    cx.theme().green,
+                    1,
+                    cx,
+                ))
+                .child(render_chart(
+                    "wifi tx",
+                    &net_tx,
+                    " KiB/s",
                     cx.theme().yellow,
                     1,
                     cx,
                 )),
         )
         .child(
-            h_flex()
-                .gap_3()
-                .flex_1()
-                .min_h_0()
-                .child(render_chart(
-                    "NVMe temp",
-                    &nvme,
-                    "°C",
-                    cx.theme().blue,
-                    1,
-                    cx,
-                ))
-                .child(render_chart(
-                    "RP1 temp",
-                    &rp1,
-                    "°C",
-                    cx.theme().green,
-                    1,
-                    cx,
-                )),
+            v_flex()
+                .gap_2()
+                .border_1()
+                .border_color(cx.theme().border)
+                .rounded_md()
+                .p_2()
+                .child(
+                    div()
+                        .text_xs()
+                        .text_color(cx.theme().muted_foreground)
+                        .child("clocks"),
+                )
+                .child(render_clocks(state, cx))
+                .child(
+                    div()
+                        .text_xs()
+                        .text_color(cx.theme().muted_foreground)
+                        .child("voltages"),
+                )
+                .child(render_voltages(state, cx)),
         )
-        .child(render_chart(
-            "ARM clock",
-            &arm,
-            " MHz",
-            cx.theme().accent,
-            0,
-            cx,
-        ))
+}
+
+fn render_memory(state: &Pimon, cx: &Context<Pimon>) -> impl IntoElement + use<> {
+    match state.latest().and_then(|s| s.memory) {
+        Some(mem) => memory_gauges(&mem, cx).into_any_element(),
+        None => div().into_any_element(),
+    }
 }
 
 fn series(history: &VecDeque<Snapshot>, pick: impl Fn(&Snapshot) -> Option<f32>) -> Vec<f32> {
     history.iter().filter_map(pick).collect()
 }
 
+// ------------------------------------------------------------- Details tab
+
 /// (label, display value, optional severity color) for the details table.
 type DetailRow = (String, String, Option<Hsla>);
 
 /// Details tab: the full sensor table plus the throttling health card.
 fn render_details_tab(state: &mut Pimon, cx: &mut Context<Pimon>) -> impl IntoElement {
-    let rows = details_rows(state);
+    let rows = details_rows(state, cx);
 
     v_flex()
         .size_full()
@@ -269,18 +448,74 @@ fn render_details_tab(state: &mut Pimon, cx: &mut Context<Pimon>) -> impl IntoEl
         .child(render_throttle_card(state, cx))
 }
 
-fn details_rows(state: &Pimon) -> Vec<DetailRow> {
+fn details_rows(state: &Pimon, cx: &Context<Pimon>) -> Vec<DetailRow> {
     let Some(latest) = state.latest() else {
         return vec![("sensors".into(), "waiting for first sweep…".into(), None)];
     };
     let mut rows = Vec::new();
 
-    push_temp(&mut rows, "SoC (cpu-thermal)", latest.soc_temp_c);
-    push_temp(&mut rows, "PMIC", latest.pmic_temp_c);
-    push_temp(&mut rows, "NVMe composite", latest.nvme_temp_c);
-    push_temp(&mut rows, "RP1 die", latest.rp1_temp_c);
+    push_temp(&mut rows, "SoC (cpu-thermal)", latest.soc_temp_c, cx);
+    push_temp(&mut rows, "PMIC", latest.pmic_temp_c, cx);
+    push_temp(&mut rows, "NVMe composite", latest.nvme_temp_c, cx);
+    push_temp(&mut rows, "RP1 die", latest.rp1_temp_c, cx);
     for (label, temp) in &latest.extra_zones_c {
-        push_temp(&mut rows, &format!("zone: {label}"), Some(*temp));
+        push_temp(&mut rows, &format!("zone: {label}"), Some(*temp), cx);
+    }
+    if let Some(util) = latest.utilization_pct {
+        rows.push((
+            "CPU utilization".into(),
+            format!("{:.1} %", util * 100.0),
+            Some(utilization_color(util, cx)),
+        ));
+    }
+    for (ix, core) in latest.cores.iter().enumerate() {
+        rows.push((
+            format!("cpu{ix}"),
+            format!("{:.1} %", core.utilization * 100.0),
+            Some(utilization_color(core.utilization, cx)),
+        ));
+    }
+    if let Some(mem) = latest.memory {
+        let MemoryInfo {
+            used_pct,
+            buff_cache_pct,
+            swap_used_pct,
+            total_mib,
+            used_mib,
+        } = mem;
+        rows.push((
+            "Memory".into(),
+            format!("{used_mib:.0} / {total_mib:.0} MiB ({used_pct:.1} %)"),
+            Some(utilization_color(used_pct / 100.0, cx)),
+        ));
+        rows.push(("Buff/cache".into(), format!("{buff_cache_pct:.1} %"), None));
+        if let Some(swap) = swap_used_pct {
+            rows.push(("Swap".into(), format!("{swap:.1} %"), None));
+        }
+    }
+    if let Some(disk) = latest.disk_io {
+        rows.push((
+            "NVMe read".into(),
+            format!("{:.2} MiB/s", disk.read_mib_s),
+            None,
+        ));
+        rows.push((
+            "NVMe write".into(),
+            format!("{:.2} MiB/s", disk.write_mib_s),
+            None,
+        ));
+    }
+    if let Some(net) = latest.net_io {
+        rows.push((
+            "Wi-Fi rx".into(),
+            format!("{:.1} KiB/s", net.rx_kib_s),
+            None,
+        ));
+        rows.push((
+            "Wi-Fi tx".into(),
+            format!("{:.1} KiB/s", net.tx_kib_s),
+            None,
+        ));
     }
     if let Some(v) = latest.core_volts {
         rows.push(("Core voltage".into(), format!("{v:.4} V"), None));
@@ -298,30 +533,30 @@ fn details_rows(state: &Pimon) -> Vec<DetailRow> {
     for (input, mv) in &latest.rp1_adc_mv {
         rows.push((format!("RP1 ADC in{input}"), format!("{mv:.0} mV"), None));
     }
+    for (name, volts) in &latest.regulators_v {
+        rows.push((format!("regulator: {name}"), format!("{volts:.2} V"), None));
+    }
     if latest.undervolt_alarm {
         rows.push((
             "Undervoltage alarm (hwmon)".into(),
             "ACTIVE".into(),
-            Some(cx_theme_red()),
+            Some(cx.theme().red),
         ));
     }
-    if let Some(mhz) = latest.arm_clock_mhz {
-        rows.push(("ARM clock".into(), format!("{mhz:.0} MHz"), None));
-    }
-    if let Some(mhz) = latest.v3d_clock_mhz {
-        rows.push(("V3D / GPU clock".into(), format!("{mhz:.0} MHz"), None));
-    }
-    if let Some(mhz) = latest.core_clock_mhz {
-        rows.push(("Core clock".into(), format!("{mhz:.0} MHz"), None));
-    }
-    for (name, mhz) in &latest.other_clocks_mhz {
+    for (name, mhz) in &latest.all_clocks_mhz {
         rows.push((format!("clock: {name}"), format!("{mhz:.0} MHz"), None));
     }
-    if let Some(load) = latest.load_1m {
-        rows.push(("Load (1 min)".into(), format!("{load:.2}"), None));
+    for (label, load) in [
+        ("Load (1 min)", latest.load_1m),
+        ("Load (5 min)", latest.load_5m),
+        ("Load (15 min)", latest.load_15m),
+    ] {
+        if let Some(load) = load {
+            rows.push((label.into(), format!("{load:.2}"), None));
+        }
     }
-    if let Some(mem) = latest.memory_percent {
-        rows.push(("Memory in use".into(), format!("{mem:.1} %"), None));
+    if let Some(uptime) = latest.uptime_secs {
+        rows.push(("Uptime".into(), fmt_uptime(uptime), None));
     }
     if let Some(rssi) = latest.rssi_dbm {
         rows.push(("Wi-Fi signal".into(), format!("{rssi:.0} dBm"), None));
@@ -329,22 +564,13 @@ fn details_rows(state: &Pimon) -> Vec<DetailRow> {
     rows
 }
 
-/// Placeholder resolved against the live theme at render time; the details
-/// table only colors the ACTIVE undervoltage row.
-fn cx_theme_red() -> Hsla {
-    // Matches gpui-component's red token; the table re-checks the theme
-    // color when rendering, this just seeds the severity tint.
-    Hsla {
-        h: 0.0,
-        s: 0.75,
-        l: 0.55,
-        a: 1.0,
-    }
-}
-
-fn push_temp(rows: &mut Vec<DetailRow>, label: &str, temp: Option<f32>) {
+fn push_temp(rows: &mut Vec<DetailRow>, label: &str, temp: Option<f32>, cx: &Context<Pimon>) {
     if let Some(temp) = temp {
-        rows.push((label.into(), format!("{temp:.1} °C"), None));
+        rows.push((
+            label.into(),
+            format!("{temp:.1} °C"),
+            Some(temp_color(temp, cx)),
+        ));
     }
 }
 
@@ -387,10 +613,15 @@ fn render_throttle_card(state: &Pimon, cx: &mut Context<Pimon>) -> impl IntoElem
         )
 }
 
-/// Bottom bar: load, memory, Wi-Fi and probe-health chips.
+/// Bottom bar: load averages, memory, Wi-Fi and probe-health chips.
 fn render_status_bar(state: &Pimon, cx: &Context<Pimon>) -> impl IntoElement {
     let latest = state.latest().cloned().unwrap_or_default();
     let interval_ms = POLL_INTERVAL.as_millis() as f32;
+    let load_text = match (latest.load_1m, latest.load_15m) {
+        (Some(a), Some(b)) => format!("{a:.2} / {b:.2}"),
+        (Some(a), None) => format!("{a:.2}"),
+        _ => String::new(),
+    };
 
     h_flex()
         .px_3()
@@ -406,24 +637,41 @@ fn render_status_bar(state: &Pimon, cx: &Context<Pimon>) -> impl IntoElement {
         .child(
             h_flex()
                 .gap_4()
-                .when_some(latest.load_1m, |this, load| {
+                .when(!load_text.is_empty(), |this| {
                     this.child(
                         h_flex()
                             .gap_2()
                             .items_center()
                             .child(Icon::new(IconName::Cpu))
-                            .child(format!("{load:.2} load")),
+                            .child(format!("{load_text} load")),
                     )
                 })
-                .when_some(latest.memory_percent, |this, mem| {
+                .when_some(latest.memory, |this, mem| {
                     this.child(
                         h_flex()
                             .gap_2()
                             .w(px(140.))
                             .items_center()
                             .child(Icon::new(IconName::MemoryStick))
-                            .child(Progress::new("status-mem").w_12().h_2().value(mem))
-                            .child(format!("{mem:.0}%")),
+                            .child(
+                                gpui_kit::component::progress::Progress::new("status-mem")
+                                    .w_12()
+                                    .h_2()
+                                    .value(mem.used_pct),
+                            )
+                            .child(format!("{:.0}%", mem.used_pct)),
+                    )
+                })
+                .when_some(latest.disk_io, |this, disk| {
+                    this.child(
+                        h_flex()
+                            .gap_2()
+                            .items_center()
+                            .child(Icon::new(IconName::HardDrive))
+                            .child(format!(
+                                "↓{:.1} ↑{:.1} MiB/s",
+                                disk.read_mib_s, disk.write_mib_s
+                            )),
                     )
                 })
                 .when_some(latest.rssi_dbm, |this, rssi| {

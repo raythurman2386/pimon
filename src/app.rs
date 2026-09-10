@@ -25,6 +25,7 @@ actions!(pimon_actions, [Quit]);
 pub fn init(cx: &mut App) {
     load_fonts(cx);
     cx.bind_keys([KeyBinding::new("ctrl-q", Quit, None)]);
+    cx.on_action(|_: &Quit, cx| cx.quit());
 }
 
 fn load_fonts(cx: &mut App) {
@@ -83,6 +84,7 @@ pub enum Health {
 
 /// The live-updating sensor dashboard.
 pub struct Pimon {
+    sweeper: pimon::sweep::Sweeper,
     probe: Arc<dyn Probe + Send + Sync>,
     clock: Clock,
     history: VecDeque<Snapshot>,
@@ -99,6 +101,7 @@ impl Pimon {
         let probe: Arc<dyn Probe + Send + Sync> = Arc::new(SystemProbe::new());
         let palette = OmarchyPalette::load(true);
         let mut this = Self {
+            sweeper: pimon::sweep::Sweeper::new(),
             probe,
             clock: Clock::started(),
             history: VecDeque::with_capacity(MAX_HISTORY),
@@ -128,9 +131,10 @@ impl Pimon {
         .detach();
     }
 
-    /// One sensor sweep into the history ring.
+    /// One sensor sweep into the history ring; rate metrics come from the
+    /// stateful Sweeper's counter deltas.
     fn sweep(&mut self, cx: &mut Context<Self>) {
-        let snapshot = pimon::sweep::collect_snapshot(self.probe.as_ref(), &self.clock);
+        let snapshot = self.sweeper.sweep(self.probe.as_ref(), &self.clock);
         match &snapshot.error {
             Some(err) => self.probe_error = Some(err.clone()),
             None => self.probe_error = None,
@@ -302,8 +306,6 @@ pub fn apply_palette(palette: &OmarchyPalette, window: Option<&mut Window>, cx: 
     theme.mono_font_size = px(13.);
     Theme::sync_base(cx);
 }
-
-// window_paddings re-export removed: views imports what it needs itself.
 
 impl Render for Pimon {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {

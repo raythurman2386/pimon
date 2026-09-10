@@ -33,8 +33,8 @@ The sweep runs once per second; sysfs reads are effectively free and `vcgencmd` 
 
 ## Tabs
 
-- **Live** — four temperature charts plus the ARM clock, one sample/second, five minutes of history.
-- **Details** — the full sensor table: temps, rails, RP1 ADC channels, clocks, load, memory, Wi-Fi, plus the firmware throttling state ("healthy" / "since boot: …" / "throttling now: …").
+- **Live** — big temperature readouts color-coded by severity, per-core utilization gauges, memory/swap/cache gauges, NVMe and Wi-Fi throughput charts, every answering clock domain, and the voltage rails — one sample/second, five minutes of history.
+- **Details** — the full sensor table: temps, per-core CPU, memory, I/O rates, RP1 ADC channels, all clock domains, regulators, loads, uptime, Wi-Fi, plus the firmware throttling state ("healthy" / "since boot: …" / "throttling now: …").
 
 The title bar carries a health badge: green when nothing has fired since boot, yellow when a throttling or undervoltage event happened earlier this boot, red while a condition is live.
 
