@@ -6,7 +6,12 @@ ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 VERSION="${VERSION:-$(sed -n 's/^version = "\(.*\)"/\1/p' "$ROOT/Cargo.toml" | head -1)}"
 ARCH="${ARCH:-x86_64}"
 TARGET="${TARGET:-${ARCH}-unknown-linux-gnu}"
-BIN="${PREBUILT_BIN:-$ROOT/target/release/pimon}"
+# target-dir may be overridden (e.g. shared cache in ~/.cargo/config.toml),
+# so ask cargo where the build landed; fall back for cargo-less setups that
+# pass PREBUILT_BIN.
+TARGET_DIR="$(cargo metadata --format-version 1 --no-deps --manifest-path "$ROOT/Cargo.toml" 2>/dev/null | sed -n 's/.*"target_directory":"\([^"]*\)".*/\1/p' || true)"
+TARGET_DIR="${TARGET_DIR:-$ROOT/target}"
+BIN="${PREBUILT_BIN:-$TARGET_DIR/release/pimon}"
 OUT_DIR="${OUT_DIR:-$ROOT/target/package}"
 NAME="pimon-${VERSION}-${TARGET}"
 STAGE="$OUT_DIR/$NAME"

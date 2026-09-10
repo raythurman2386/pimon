@@ -8,7 +8,12 @@ PREFIX="${PREFIX:-$HOME/.local}"
 cd "$ROOT"
 cargo build --release --locked
 
-install -Dm755 "$ROOT/target/release/pimon" "$PREFIX/bin/pimon"
+# target-dir may be overridden (e.g. shared cache in ~/.cargo/config.toml),
+# so ask cargo where the build actually landed instead of assuming target/.
+TARGET_DIR="$(cargo metadata --format-version 1 --no-deps | sed -n 's/.*"target_directory":"\([^"]*\)".*/\1/p')"
+[[ -n "$TARGET_DIR" ]] || { echo "install.sh: could not resolve cargo target directory" >&2; exit 1; }
+
+install -Dm755 "$TARGET_DIR/release/pimon" "$PREFIX/bin/pimon"
 install -Dm644 "$ROOT/dist/pimon.desktop" "$PREFIX/share/applications/pimon.desktop"
 install -Dm644 "$ROOT/dist/pimon.svg" "$PREFIX/share/icons/hicolor/scalable/apps/pimon.svg"
 install -Dm644 "$ROOT/LICENSE" "$PREFIX/share/licenses/pimon/LICENSE"
