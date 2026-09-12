@@ -14,7 +14,7 @@ User-local install (binary, icon, launcher). No root:
 
 That puts `pimon` on `~/.local/bin` and a desktop entry in the app launcher. Uninstall with `./scripts/uninstall.sh`.
 
-Tagged releases (`v*`) build a Linux x86_64 tarball on GitHub Actions. Unpack it and run `./install.sh` inside.
+Tagged releases (`v*`) build Linux tarballs on GitHub Actions for both `x86_64-unknown-linux-gnu` (on `ubuntu-latest`) and `aarch64-unknown-linux-gnu` (on GitHub's native arm64 runners). Unpack the tarball for your architecture and run `./install.sh` inside. Prebuilt binaries need glibc 2.39+ (Ubuntu 24.04, Debian 13, current Raspberry Pi OS).
 
 ## Run from source
 
