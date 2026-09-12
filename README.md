@@ -6,13 +6,13 @@ The sensor backend is pure Rust with no UI imports: every parse and assembly ste
 
 ## Install
 
-From a tagged release (recommended; signature + checksum verified, no root):
+Install straight from a tagged release without cloning:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/raythurman2386/pimon/master/scripts/netinstall.sh | sh
+curl -fsSL https://raw.githubusercontent.com/raythurman2386/pimon/master/scripts/netinstall.sh | bash
 ```
 
-That downloads the latest release tarball for your architecture (x86_64 or aarch64), verifies its Ed25519 signature and SHA-256 checksum — refusing the install when either fails — and runs the tarball's bundled installer, which puts `pimon` on `~/.local/bin` and a desktop entry in the app launcher. Pin a version with `--version 0.1.0`.
+The netinstaller resolves the latest `v*` release, verifies its `checksums.txt` against a pinned Ed25519 public key (fail closed — no signature or a bad one refuses the install), checks the tarball's SHA-256, then installs into `~/.local` (override with `--prefix DIR`, `--force` to overwrite, or a version argument: `... | bash -s -- 0.1.1`).
 
 From a checkout (binary, icon, launcher). No root:
 
@@ -22,7 +22,7 @@ From a checkout (binary, icon, launcher). No root:
 
 That puts `pimon` on `~/.local/bin` and a desktop entry in the app launcher. Uninstall with `./scripts/uninstall.sh`.
 
-Tagged releases (`v*`) build Linux tarballs on GitHub Actions for both `x86_64-unknown-linux-gnu` (on `ubuntu-latest`) and `aarch64-unknown-linux-gnu` (on GitHub's native arm64 runners). Unpack the tarball for your architecture and run `./install.sh` inside. Prebuilt binaries need glibc 2.39+ (Ubuntu 24.04, Debian 13, current Raspberry Pi OS).
+Tagged releases (`v*`) build Linux tarballs on GitHub Actions for x86_64 and aarch64 (Raspberry Pi 5 and other 64-bit ARM boards), each requiring glibc 2.39+ (Debian 13, Ubuntu 24.04, current Raspberry Pi OS). Unpack the one for your machine and run `./install.sh` inside.
 
 ## Run from source
 
