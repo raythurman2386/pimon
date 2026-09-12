@@ -6,7 +6,15 @@ The sensor backend is pure Rust with no UI imports: every parse and assembly ste
 
 ## Install
 
-User-local install (binary, icon, launcher). No root:
+From a tagged release (recommended; signature + checksum verified, no root):
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/raythurman2386/pimon/master/scripts/netinstall.sh | sh
+```
+
+That downloads the latest release tarball for your architecture (x86_64 or aarch64), verifies its Ed25519 signature and SHA-256 checksum — refusing the install when either fails — and runs the tarball's bundled installer, which puts `pimon` on `~/.local/bin` and a desktop entry in the app launcher. Pin a version with `--version 0.1.0`.
+
+From a checkout (binary, icon, launcher). No root:
 
 ```sh
 ./scripts/install.sh
