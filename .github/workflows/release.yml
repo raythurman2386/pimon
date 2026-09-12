@@ -48,11 +48,22 @@ jobs:
         id: pkg
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
-          TARGET="${{ matrix.target }}" bash scripts/package-linux.sh
+          TARGET="${{ matrix.target }}" \
+            PREBUILT_BIN="target/${{ matrix.target }}/release/pimon" \
+            bash scripts/package-linux.sh
           TARBALL="target/package/pimon-${VERSION}-${{ matrix.target }}.tar.gz"
           test -f "$TARBALL"
           echo "tarball=${TARBALL}" >> "$GITHUB_OUTPUT"
           echo "asset=$(basename "$TARBALL")" >> "$GITHUB_OUTPUT"
+      - name: Smoke test the packaged tarball
+        run: |
+          TARBALL="target/package/pimon-${GITHUB_REF_NAME#v}-${{ matrix.target }}.tar.gz"
+          TMPDIR="$(mktemp -d)"
+          trap 'rm -rf "$TMPDIR"' EXIT
+          tar -xzf "$TARBALL" -C "$TMPDIR"
+          PREFIX="$TMPDIR/prefix" "$TMPDIR"/pimon-*/install.sh
+          test -x "$TMPDIR/prefix/bin/pimon"
+          "$TMPDIR/prefix/bin/pimon" --version
       - name: Upload artifact
         uses: actions/upload-artifact@v7
         with:
