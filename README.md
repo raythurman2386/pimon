@@ -22,6 +22,19 @@ Tagged releases (`v*`) build Linux tarballs on GitHub Actions for both `x86_64-u
 cargo run --release
 ```
 
+## Release signing
+
+Each release's `checksums.txt` is signed with an Ed25519 key. The secret key is generated locally with `scripts/gen-signing-key.sh` and stays offline — it is never committed, never put in CI, and never uploaded. Only the public key is committed here as `pimon-signing-key.pub` and pinned in the installers.
+
+After a release publishes, sign and attach its checksums:
+
+```sh
+scripts/sign-releases.sh v0.1.0        # download + sign checksums.txt (offline)
+scripts/upload-release-sigs.sh v0.1.0  # attach checksums.txt.sig to the release
+```
+
+Installers verify `checksums.txt.sig` against the pinned public key with `openssl pkeyutl -verify -rawin` and refuse to install when the signature is missing or bad (fail closed), then check the tarball's SHA-256 against `checksums.txt`.
+
 ## What it reads
 
 - `/sys/class/thermal` — SoC temperature (zone0) plus any extra zones
