@@ -1,6 +1,6 @@
 [package]
 name = "pimon"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 license = "MIT"
 description = "A hardware sensor monitor for the Raspberry Pi built with GPUI Kit"
