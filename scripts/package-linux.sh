@@ -11,7 +11,14 @@ TARGET="${TARGET:-${ARCH}-unknown-linux-gnu}"
 # pass PREBUILT_BIN.
 TARGET_DIR="$(cargo metadata --format-version 1 --no-deps --manifest-path "$ROOT/Cargo.toml" 2>/dev/null | sed -n 's/.*"target_directory":"\([^"]*\)".*/\1/p' || true)"
 TARGET_DIR="${TARGET_DIR:-$ROOT/target}"
-BIN="${PREBUILT_BIN:-$TARGET_DIR/release/pimon}"
+# With an explicit TARGET, cargo build --target places the binary under
+# <target-dir>/<triple>/release/; only the host-native build lands directly
+# in <target-dir>/release/.
+if [[ -n "${TARGET:-}" && -x "$TARGET_DIR/$TARGET/release/pimon" ]]; then
+  BIN="${PREBUILT_BIN:-$TARGET_DIR/$TARGET/release/pimon}"
+else
+  BIN="${PREBUILT_BIN:-$TARGET_DIR/release/pimon}"
+fi
 OUT_DIR="${OUT_DIR:-$ROOT/target/package}"
 NAME="pimon-${VERSION}-${TARGET}"
 STAGE="$OUT_DIR/$NAME"
