@@ -70,3 +70,5 @@ jobs:
         run: bash scripts/ci-linux-deps.sh
       - name: Run tests
         run: cargo test --locked
+      - name: Netinstaller integrity harness
+        run: bash scripts/test-netinstall.sh
